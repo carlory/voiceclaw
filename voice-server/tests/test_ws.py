@@ -13,7 +13,10 @@ def mock_websocket() -> MagicMock:
     """Create a mock WebSocket."""
     ws = MagicMock()
     ws.remote_address = ("127.0.0.1", 12345)
-    ws.send = AsyncMock()
+    ws.client = MagicMock()
+    ws.client.host = "127.0.0.1"
+    ws.client.port = 12345
+    ws.send_text = AsyncMock()
     return ws
 
 
@@ -49,8 +52,8 @@ class TestVoiceSession:
 
     def test_init(self, mock_websocket: MagicMock) -> None:
         """Test session initialization."""
-        with patch("src.ws.handler.get_asr_engine") as mock_asr, \
-             patch("src.ws.handler.get_tts_engine") as mock_tts:
+        with patch("src.ws.handler.get_asr_engine"), \
+             patch("src.ws.handler.get_tts_engine"):
             session = VoiceSession(mock_websocket)
             
             assert session.websocket == mock_websocket
@@ -67,8 +70,8 @@ class TestVoiceSession:
             await session.handle_message(json.dumps({"type": "text", "text": ""}))
             
             # Should send error
-            mock_websocket.send.assert_called_once()
-            call_args = mock_websocket.send.call_args[0][0]
+            mock_websocket.send_text.assert_called_once()
+            call_args = mock_websocket.send_text.call_args[0][0]
             response = json.loads(call_args)
             assert response["type"] == "error"
 
@@ -82,8 +85,8 @@ class TestVoiceSession:
             await session.handle_message(json.dumps({"type": "unknown"}))
             
             # Should send error
-            mock_websocket.send.assert_called_once()
-            call_args = mock_websocket.send.call_args[0][0]
+            mock_websocket.send_text.assert_called_once()
+            call_args = mock_websocket.send_text.call_args[0][0]
             response = json.loads(call_args)
             assert response["type"] == "error"
             assert "Unknown message type" in response["text"]
@@ -98,8 +101,8 @@ class TestVoiceSession:
             await session.handle_message("not valid json")
             
             # Should send error
-            mock_websocket.send.assert_called_once()
-            call_args = mock_websocket.send.call_args[0][0]
+            mock_websocket.send_text.assert_called_once()
+            call_args = mock_websocket.send_text.call_args[0][0]
             response = json.loads(call_args)
             assert response["type"] == "error"
             assert "Invalid JSON" in response["text"]
