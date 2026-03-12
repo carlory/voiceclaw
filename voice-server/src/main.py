@@ -4,13 +4,15 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 from src.config import settings
 from src.stt.qwen_asr import ASREngine, TranscriptionResult, get_asr_engine
 from src.tts.qwen_tts import TTSEngine, SynthesisResult, get_tts_engine
+from src.ws.handler import websocket_handler
 
 # Configure logging
 logging.basicConfig(
@@ -152,6 +154,30 @@ async def text_to_speech(request: TTSRequest) -> Response:
     except Exception as e:
         logger.error(f"TTS failed: {e}")
         raise HTTPException(status_code=500, detail=f"Synthesis failed: {e}")
+
+
+@app.websocket("/ws/voice")
+async def websocket_voice_endpoint(websocket: WebSocket) -> None:
+    """WebSocket endpoint for real-time voice communication.
+    
+    Protocol:
+    - Client sends: {"type": "audio", "data": "<base64>"}
+    - Client sends: {"type": "text", "text": "你好"}
+    - Server sends: {"type": "transcript", "text": "你好", "language": "Chinese"}
+    - Server sends: {"type": "audio", "data": "<base64>"}
+    - Server sends: {"type": "done"}
+    - Server sends: {"type": "error", "text": "..."}
+    """
+    await websocket.accept()
+    logger.info(f"WebSocket connection accepted: {websocket.client}")
+    
+    try:
+        await websocket_handler(websocket)
+    except WebSocketDisconnect:
+        logger.info(f"WebSocket disconnected: {websocket.client}")
+    except Exception as e:
+        logger.error(f"WebSocket error: {e}")
+        await websocket.close(code=1011, reason=str(e))
 
 
 def run_server() -> None:
