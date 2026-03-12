@@ -2,6 +2,11 @@ import { useState, type KeyboardEvent } from 'react'
 import { useVoiceClient } from '../hooks/useVoiceClient'
 import './VoiceChat.css'
 
+// Only log in development mode
+const devLog = import.meta.env.DEV 
+  ? (type: string, ...args: unknown[]) => console[type](...args)
+  : () => {}
+
 export function VoiceChat() {
   const [textInput, setTextInput] = useState('')
   
@@ -19,9 +24,9 @@ export function VoiceChat() {
     sendText,
     clearHistory,
   } = useVoiceClient({
-    onTranscript: (text) => console.log('Transcript:', text),
-    onResponse: (text) => console.log('Response:', text),
-    onError: (err) => console.error('Error:', err),
+    onTranscript: (text) => devLog('log', 'Transcript:', text),
+    onResponse: (text) => devLog('log', 'Response:', text),
+    onError: (err) => devLog('error', 'Error:', err),
   })
 
   const handleConnect = () => {
@@ -125,6 +130,7 @@ export function VoiceChat() {
             onChange={(e) => setTextInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Type a message..."
+            aria-label="Text message input"
             disabled={!isConnected}
           />
           <button
