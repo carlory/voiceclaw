@@ -84,7 +84,9 @@ export function useVoiceClient(options: UseVoiceClientOptions = {}) {
 
   // Connect to WebSocket server
   const connect = useCallback(() => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
+    // Guard against multiple clicks while connecting
+    if (wsRef.current?.readyState === WebSocket.OPEN || 
+        wsRef.current?.readyState === WebSocket.CONNECTING) {
       return
     }
 
@@ -146,7 +148,12 @@ export function useVoiceClient(options: UseVoiceClientOptions = {}) {
             break
 
           case 'error':
-            setState(prev => ({ ...prev, error: message.text || 'Unknown error' }))
+            // Reset isProcessing on error to prevent stuck UI
+            setState(prev => ({ 
+              ...prev, 
+              error: message.text || 'Unknown error',
+              isProcessing: false,
+            }))
             onError?.(message.text || 'Unknown error')
             break
         }
@@ -166,6 +173,7 @@ export function useVoiceClient(options: UseVoiceClientOptions = {}) {
 
   // Play audio from base64
   const playAudio = async (base64Audio: string) => {
+    let url: string | null = null
     try {
       // Decode base64 to array buffer
       const binaryString = atob(base64Audio)
@@ -176,20 +184,44 @@ export function useVoiceClient(options: UseVoiceClientOptions = {}) {
 
       // Create audio blob (assuming WAV format from server)
       const blob = new Blob([bytes], { type: 'audio/wav' })
-      const url = URL.createObjectURL(blob)
+      url = URL.createObjectURL(blob)
 
       // Play audio
       const audio = new Audio(url)
       audioPlayerRef.current = audio
       await audio.play()
 
-      audio.onended = () => {
-        URL.revokeObjectURL(url)
+      const cleanup = () => {
+        if (url) {
+          URL.revokeObjectURL(url)
+        }
         audioPlayerRef.current = null
+      }
+
+      audio.onended = cleanup
+      audio.onerror = () => {
+        console.error('[VoiceClaw] Audio playback error')
+        cleanup()
       }
     } catch (err) {
       console.error('[VoiceClaw] Failed to play audio:', err)
+      if (url) {
+        URL.revokeObjectURL(url)
+      }
+      audioPlayerRef.current = null
     }
+  }
+
+  // Efficient base64 encoding for audio chunks
+  const arrayToBase64 = (uint8Array: Uint8Array): string => {
+    // Use chunked conversion for better performance
+    const chunks: string[] = []
+    const chunkSize = 8192
+    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+      const chunk = uint8Array.subarray(i, Math.min(i + chunkSize, uint8Array.length))
+      chunks.push(String.fromCharCode(...chunk))
+    }
+    return btoa(chunks.join(''))
   }
 
   // Send audio data to server
@@ -199,13 +231,9 @@ export function useVoiceClient(options: UseVoiceClientOptions = {}) {
       return
     }
 
-    // Convert Int16Array to base64
+    // Convert Int16Array to base64 (efficient)
     const uint8Array = new Uint8Array(audioData.buffer)
-    let binary = ''
-    for (let i = 0; i < uint8Array.length; i++) {
-      binary += String.fromCharCode(uint8Array[i])
-    }
-    const base64 = btoa(binary)
+    const base64 = arrayToBase64(uint8Array)
 
     const message: WSMessage = {
       type: 'audio',
@@ -269,8 +297,13 @@ export function useVoiceClient(options: UseVoiceClientOptions = {}) {
         sendAudio(pcmData)
       }
 
+      // Route through a muted GainNode to avoid sidetone/echo
+      const silentGain = audioContext.createGain()
+      silentGain.gain.value = 0
+      
       source.connect(processor)
-      processor.connect(audioContext.destination)
+      processor.connect(silentGain)
+      silentGain.connect(audioContext.destination)
 
       setState(prev => ({ ...prev, isRecording: true, error: null }))
       console.log('[VoiceClaw] Recording started')

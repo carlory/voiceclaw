@@ -31,7 +31,7 @@ npm run build
 
 ## Configuration
 
-The client connects to `ws://localhost:8765/ws/voice` by default. Update `serverUrl` in `useVoiceClient` hook to change.
+By default, the client connects to the relative WebSocket path `/ws/voice` (for example, `ws://<current-host>/ws/voice`). In development, Vite proxies this path to `ws://localhost:8765/ws/voice`. You can change this by updating `serverUrl` in the `useVoiceClient` hook.
 
 ---
 
