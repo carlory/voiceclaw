@@ -19,6 +19,7 @@ mlx = "^0.22.0"
 mlx-audio = "^0.1.0"
 numpy = "^2.2.0"
 scipy = "^1.15.0"
+librosa = "^0.11.0"
 httpx = "^0.28.0"
 
 [tool.poetry.group.dev.dependencies]
