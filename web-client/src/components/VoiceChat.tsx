@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type KeyboardEvent } from 'react'
 import { useVoiceClient } from '../hooks/useVoiceClient'
 import './VoiceChat.css'
 
@@ -47,7 +47,7 @@ export function VoiceChat() {
     }
   }
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSendText()
@@ -123,7 +123,7 @@ export function VoiceChat() {
             type="text"
             value={textInput}
             onChange={(e) => setTextInput(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onKeyDown={handleKeyDown}
             placeholder="Type a message..."
             disabled={!isConnected}
           />

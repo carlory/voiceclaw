@@ -34,7 +34,7 @@ interface VoiceClientState {
 
 export function useVoiceClient(options: UseVoiceClientOptions = {}) {
   const {
-    serverUrl = `ws://${window.location.hostname}:8765/ws/voice`,
+    serverUrl = '/ws/voice',
     onTranscript,
     onResponse,
     onError,
@@ -53,8 +53,34 @@ export function useVoiceClient(options: UseVoiceClientOptions = {}) {
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const processorRef = useRef<ScriptProcessorNode | null>(null)
-  const audioQueueRef = useRef<Int16Array[]>([])
   const audioPlayerRef = useRef<HTMLAudioElement | null>(null)
+
+  // Build full WebSocket URL from relative path
+  const getWsUrl = useCallback((path: string) => {
+    if (path.startsWith('ws://') || path.startsWith('wss://')) {
+      return path
+    }
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    return `${protocol}//${window.location.host}${path}`
+  }, [])
+
+  // Cleanup recording resources
+  const cleanupRecording = useCallback(() => {
+    if (processorRef.current) {
+      try { processorRef.current.disconnect() } catch { /* ignore */ }
+      processorRef.current = null
+    }
+
+    if (audioContextRef.current) {
+      try { audioContextRef.current.close() } catch { /* ignore */ }
+      audioContextRef.current = null
+    }
+
+    if (mediaStreamRef.current) {
+      try { mediaStreamRef.current.getTracks().forEach(track => track.stop()) } catch { /* ignore */ }
+      mediaStreamRef.current = null
+    }
+  }, [])
 
   // Connect to WebSocket server
   const connect = useCallback(() => {
@@ -62,7 +88,8 @@ export function useVoiceClient(options: UseVoiceClientOptions = {}) {
       return
     }
 
-    const ws = new WebSocket(serverUrl)
+    const wsUrl = getWsUrl(serverUrl)
+    const ws = new WebSocket(wsUrl)
     wsRef.current = ws
 
     ws.onopen = () => {
@@ -72,7 +99,14 @@ export function useVoiceClient(options: UseVoiceClientOptions = {}) {
 
     ws.onclose = () => {
       console.log('[VoiceClaw] Disconnected from server')
-      setState(prev => ({ ...prev, isConnected: false }))
+      // Cleanup recording resources on disconnect
+      cleanupRecording()
+      setState(prev => ({
+        ...prev,
+        isConnected: false,
+        isRecording: false,
+        isProcessing: false,
+      }))
     }
 
     ws.onerror = (event) => {
@@ -120,14 +154,15 @@ export function useVoiceClient(options: UseVoiceClientOptions = {}) {
         console.error('[VoiceClaw] Failed to parse message:', err)
       }
     }
-  }, [serverUrl, onTranscript, onResponse, onError])
+  }, [serverUrl, getWsUrl, cleanupRecording, onTranscript, onResponse, onError])
 
   // Disconnect from WebSocket server
   const disconnect = useCallback(() => {
-    stopRecording()
+    cleanupRecording()
+    setState(prev => ({ ...prev, isRecording: false }))
     wsRef.current?.close()
     wsRef.current = null
-  }, [])
+  }, [cleanupRecording])
 
   // Play audio from base64
   const playAudio = async (base64Audio: string) => {
@@ -248,24 +283,10 @@ export function useVoiceClient(options: UseVoiceClientOptions = {}) {
 
   // Stop recording audio
   const stopRecording = useCallback(() => {
-    if (processorRef.current) {
-      processorRef.current.disconnect()
-      processorRef.current = null
-    }
-
-    if (audioContextRef.current) {
-      audioContextRef.current.close()
-      audioContextRef.current = null
-    }
-
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach(track => track.stop())
-      mediaStreamRef.current = null
-    }
-
+    cleanupRecording()
     setState(prev => ({ ...prev, isRecording: false }))
     console.log('[VoiceClaw] Recording stopped')
-  }, [])
+  }, [cleanupRecording])
 
   // Clear transcript and response
   const clearHistory = useCallback(() => {
