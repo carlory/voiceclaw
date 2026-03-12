@@ -6,9 +6,11 @@ from typing import AsyncGenerator
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 
 from src.config import settings
 from src.stt.qwen_asr import ASREngine, TranscriptionResult, get_asr_engine
+from src.tts.qwen_tts import TTSEngine, SynthesisResult, get_tts_engine
 
 # Configure logging
 logging.basicConfig(
@@ -20,19 +22,21 @@ logger = logging.getLogger(__name__)
 
 # Global engine instances
 _asr_engine: ASREngine | None = None
+_tts_engine: TTSEngine | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler."""
-    global _asr_engine
+    global _asr_engine, _tts_engine
     
     logger.info(f"Starting VoiceClaw server on {settings.host}:{settings.port}")
     logger.info(f"ASR model: {settings.asr_model}")
     logger.info(f"TTS model: {settings.tts_model}")
     
-    # Initialize ASR engine
+    # Initialize engines
     _asr_engine = get_asr_engine()
+    _tts_engine = get_tts_engine()
     
     yield
     
@@ -100,6 +104,54 @@ async def speech_to_text(
     except Exception as e:
         logger.error(f"STT failed: {e}")
         raise HTTPException(status_code=500, detail=f"Transcription failed: {e}")
+
+
+class TTSRequest(BaseModel):
+    """TTS request body."""
+
+    text: str
+    lang_code: str = "zh"
+    speaker: str | None = None
+
+
+@app.post("/tts")
+async def text_to_speech(request: TTSRequest) -> Response:
+    """Synthesize text to speech using Qwen3-TTS.
+    
+    Args:
+        request: TTS request with text, lang_code, and optional speaker.
+    
+    Returns:
+        Audio file (WAV format).
+    
+    Raises:
+        HTTPException: If synthesis fails.
+    """
+    if _tts_engine is None:
+        raise HTTPException(status_code=503, detail="TTS engine not initialized")
+    
+    try:
+        result = _tts_engine.synthesize(
+            text=request.text,
+            lang_code=request.lang_code,
+            speaker=request.speaker,
+        )
+        logger.info(f"Synthesized: {request.text[:50]}... ({result.duration_ms:.0f}ms)")
+        
+        return Response(
+            content=result.audio,
+            media_type="audio/wav",
+            headers={
+                "X-Duration-Ms": str(result.duration_ms or 0),
+                "X-Sample-Rate": str(result.sample_rate),
+            },
+        )
+    except ValueError as e:
+        logger.error(f"TTS validation error: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"TTS failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Synthesis failed: {e}")
 
 
 def run_server() -> None:
