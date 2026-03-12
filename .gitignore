@@ -73,6 +73,7 @@ Thumbs.db
 
 # Build artifacts
 *.js
+!**/eslint.config.js
 *.js.map
 node_modules/
 
