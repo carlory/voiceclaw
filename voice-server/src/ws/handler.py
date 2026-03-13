@@ -3,6 +3,7 @@
 import base64
 import json
 import logging
+import re
 import time
 from enum import Enum
 from typing import Optional
@@ -17,6 +18,9 @@ from src.tts.qwen_tts import get_tts_engine
 
 logger = logging.getLogger(__name__)
 
+# Sentence-ending punctuation for Chinese and English
+SENTENCE_END_PATTERN = re.compile(r"[。！？.!?]")
+
 
 class MessageType(str, Enum):
     """WebSocket message types."""
@@ -25,6 +29,9 @@ class MessageType(str, Enum):
     TEXT = "text"
     TRANSCRIPT = "transcript"
     RESPONSE = "response"
+    RESPONSE_START = "response_start"
+    RESPONSE_CHUNK = "response_chunk"
+    RESPONSE_END = "response_end"
     ERROR = "error"
     DONE = "done"
 
@@ -174,11 +181,8 @@ class VoiceSession:
             # Send acknowledgment
             await self._send_transcript(text, language)
 
-            # Forward to OpenClaw Gateway
-            response_text = await self._get_llm_response(text)
-
-            # Synthesize response
-            await self._synthesize_and_send(response_text)
+            # Stream response from OpenClaw Gateway
+            await self._stream_llm_response(text)
 
         except Exception as e:
             logger.error(f"Error processing text: {e}")
@@ -207,11 +211,8 @@ class VoiceSession:
             self.last_speech_time = None
             self.silence_start_time = None
 
-            # Forward to OpenClaw Gateway
-            response_text = await self._get_llm_response(result.text)
-
-            # Synthesize response
-            await self._synthesize_and_send(response_text)
+            # Stream response from OpenClaw Gateway
+            await self._stream_llm_response(result.text)
 
         except Exception as e:
             logger.error(f"Error transcribing audio: {e}")
@@ -222,7 +223,7 @@ class VoiceSession:
             self.silence_start_time = None
 
     async def _get_llm_response(self, user_text: str) -> str:
-        """Get response from OpenClaw Gateway.
+        """Get response from OpenClaw Gateway (non-streaming fallback).
 
         Args:
             user_text: User's transcribed or typed text.
@@ -241,6 +242,84 @@ class VoiceSession:
             logger.error(f"Gateway error: {e}")
             # Fallback response when Gateway is unavailable
             return "抱歉，我现在连不上大脑，待会儿再试试？"
+
+    async def _stream_llm_response(self, user_text: str) -> None:
+        """Stream response from OpenClaw Gateway with sentence-level TTS.
+
+        Args:
+            user_text: User's transcribed or typed text.
+        """
+        try:
+            # Send response start marker
+            await self._send_message(MessageType.RESPONSE_START)
+
+            buffer = ""
+            full_response = ""
+
+            async for chunk in self.gateway_client.chat_stream(
+                message=user_text,
+                session_id=self.session_id,
+                system_prompt=DEFAULT_SYSTEM_PROMPT,
+            ):
+                buffer += chunk
+                full_response += chunk
+
+                # Send text chunk to client
+                await self._send_message(MessageType.RESPONSE_CHUNK, text=chunk)
+
+                # Check for sentence boundaries
+                while True:
+                    match = SENTENCE_END_PATTERN.search(buffer)
+                    if not match:
+                        break
+
+                    # Extract sentence (include the punctuation)
+                    end_pos = match.end()
+                    sentence = buffer[:end_pos].strip()
+                    buffer = buffer[end_pos:]
+
+                    if sentence:
+                        # Synthesize and send sentence audio
+                        await self._synthesize_and_send_sentence(sentence)
+
+            # Process any remaining text in buffer
+            if buffer.strip():
+                await self._synthesize_and_send_sentence(buffer.strip())
+
+            # Send response end marker
+            await self._send_message(MessageType.RESPONSE_END, text=full_response)
+
+            # Send done
+            await self._send_message(MessageType.DONE)
+
+        except Exception as e:
+            logger.error(f"Gateway stream error: {e}")
+            # Fallback to non-streaming
+            fallback = "抱歉，我现在连不上大脑，待会儿再试试？"
+            await self._send_message(MessageType.RESPONSE_CHUNK, text=fallback)
+            await self._send_message(MessageType.RESPONSE_END, text=fallback)
+            await self._send_message(MessageType.DONE)
+
+    async def _synthesize_and_send_sentence(self, text: str) -> None:
+        """Synthesize a single sentence and send audio.
+
+        Args:
+            text: Sentence text to synthesize.
+        """
+        try:
+            # Synthesize
+            result = self.tts_engine.synthesize(text)
+
+            # Send as base64
+            audio_base64 = base64.b64encode(result.audio).decode("utf-8")
+            await self._send_message(
+                MessageType.AUDIO,
+                data=audio_base64,
+            )
+
+        except Exception as e:
+            logger.error(f"Error synthesizing sentence: {e}")
+            # Don't send error for individual sentences, just log
 
     async def _synthesize_and_send(self, text: str) -> None:
         """Synthesize text and send audio."""

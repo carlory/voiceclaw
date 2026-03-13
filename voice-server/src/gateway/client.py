@@ -1,6 +1,8 @@
 """OpenClaw Gateway client for LLM responses."""
 
+import json
 import logging
+from collections.abc import AsyncIterator
 from typing import Optional
 
 import httpx
@@ -138,6 +140,78 @@ class GatewayClient:
         except Exception as e:
             logger.warning(f"Gateway health check failed: {e}")
             return False
+
+    async def chat_stream(
+        self,
+        message: str,
+        session_id: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+    ) -> AsyncIterator[str]:
+        """Send a chat message and stream the response.
+
+        Args:
+            message: User message
+            session_id: Optional session ID for conversation continuity
+            system_prompt: Optional system prompt override
+
+        Yields:
+            Text chunks as they arrive
+
+        Raises:
+            httpx.HTTPStatusError: If HTTP request fails (4xx/5xx)
+            httpx.RequestError: If connection fails
+            RuntimeError: If Gateway returns an error response
+        """
+        # Build request payload for OpenClaw Gateway
+        payload = {
+            "model": settings.openclaw_model,
+            "messages": [
+                {"role": "user", "content": message},
+            ],
+            "stream": True,
+        }
+
+        if session_id:
+            payload["session_id"] = session_id
+
+        if system_prompt:
+            payload["messages"].insert(0, {"role": "system", "content": system_prompt})
+
+        logger.debug(f"Sending stream request (len={len(message)}, session={session_id})")
+
+        # Stream response
+        async with self.client.stream(
+            "POST",
+            "/v1/chat/completions",
+            json=payload,
+        ) as response:
+            response.raise_for_status()
+
+            async for line in response.aiter_lines():
+                if not line or line == "data: [DONE]":
+                    continue
+
+                # Parse SSE format: "data: {...}"
+                if line.startswith("data: "):
+                    data_str = line[6:]  # Remove "data: " prefix
+                    try:
+                        data = json.loads(data_str)
+
+                        # Handle OpenAI-compatible streaming format
+                        if "choices" in data and len(data["choices"]) > 0:
+                            delta = data["choices"][0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                yield content
+
+                        # Handle error response
+                        if "error" in data:
+                            logger.error(f"Gateway stream error: {data['error']}")
+                            raise RuntimeError(f"Gateway error: {data['error']}")
+
+                    except json.JSONDecodeError:
+                        logger.warning(f"Failed to parse SSE data: {data_str}")
+                        continue
 
 
 # Singleton instance
