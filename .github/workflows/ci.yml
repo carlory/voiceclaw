@@ -7,35 +7,45 @@ on:
     branches: [main]
 
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12"]
-
     steps:
       - uses: actions/checkout@v4
 
       - name: Install Poetry
         run: pipx install poetry
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install lint dependencies
         working-directory: voice-server
-        run: poetry install --with dev
+        run: |
+          poetry config virtualenvs.create true
+          poetry install --only dev --no-root
 
       - name: Lint with ruff
         working-directory: voice-server
         run: poetry run ruff check src/ tests/
 
-      - name: Type check with mypy
+  test:
+    runs-on: macos-latest  # MLX requires Apple Silicon
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Poetry
+        run: pipx install poetry
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
         working-directory: voice-server
-        run: poetry run mypy src/
-        continue-on-error: true  # Don't fail on type errors for now
+        run: poetry install --with dev
 
       - name: Run tests
         working-directory: voice-server
@@ -43,7 +53,6 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -51,8 +60,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
-          cache-dependency-path: web-client/package-lock.json
 
       - name: Install dependencies
         working-directory: web-client
