@@ -69,7 +69,22 @@ class VoiceSession:
         self.last_speech_time: Optional[float] = None
         self.silence_start_time: Optional[float] = None
         self.session_id: Optional[str] = None
+        self._started = False
         logger.info(f"VoiceSession initialized for {self._get_client_info()}")
+
+    async def start(self) -> None:
+        """Start the session (initialize async resources)."""
+        if self._started:
+            return
+        await self.gateway_client.start()
+        self._started = True
+
+    async def stop(self) -> None:
+        """Stop the session (cleanup async resources)."""
+        if not self._started:
+            return
+        await self.gateway_client.stop()
+        self._started = False
 
     def _get_client_info(self) -> str:
         """Get client info for logging."""
@@ -216,13 +231,12 @@ class VoiceSession:
             LLM response text.
         """
         try:
-            async with self.gateway_client as client:
-                response = await client.chat(
-                    message=user_text,
-                    session_id=self.session_id,
-                    system_prompt=DEFAULT_SYSTEM_PROMPT,
-                )
-                return response
+            response = await self.gateway_client.chat(
+                message=user_text,
+                session_id=self.session_id,
+                system_prompt=DEFAULT_SYSTEM_PROMPT,
+            )
+            return response
         except Exception as e:
             logger.error(f"Gateway error: {e}")
             # Fallback response when Gateway is unavailable
@@ -305,6 +319,7 @@ async def websocket_handler(websocket) -> None:
     session = VoiceSession(websocket)
 
     try:
+        await session.start()
         while True:
             # Receive message from client
             message = await websocket.receive_text()
@@ -312,3 +327,5 @@ async def websocket_handler(websocket) -> None:
     except Exception as e:
         # WebSocket disconnect or other error
         logger.info(f"WebSocket connection closed ({client_info}): {e}")
+    finally:
+        await session.stop()

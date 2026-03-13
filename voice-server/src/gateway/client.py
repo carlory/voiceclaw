@@ -1,6 +1,5 @@
 """OpenClaw Gateway client for LLM responses."""
 
-import json
 import logging
 from typing import Optional
 
@@ -12,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class GatewayClient:
-    """Client for OpenClaw Gateway API."""
+    """Client for OpenClaw Gateway API with connection pooling."""
 
     def __init__(self, base_url: Optional[str] = None) -> None:
         """Initialize Gateway client.
@@ -24,25 +23,43 @@ class GatewayClient:
         self.timeout = httpx.Timeout(30.0)
         self._client: Optional[httpx.AsyncClient] = None
 
-    async def __aenter__(self) -> "GatewayClient":
-        """Async context manager entry."""
+    async def start(self) -> None:
+        """Start the HTTP client for connection pooling."""
+        if self._client is not None:
+            return
+
+        headers = {}
+        if settings.openclaw_gateway_token:
+            headers["Authorization"] = f"Bearer {settings.openclaw_gateway_token}"
+
         self._client = httpx.AsyncClient(
             base_url=self.base_url,
             timeout=self.timeout,
+            headers=headers if headers else None,
         )
+        logger.debug("GatewayClient started")
+
+    async def stop(self) -> None:
+        """Stop the HTTP client."""
+        if self._client:
+            await self._client.aclose()
+            self._client = None
+            logger.debug("GatewayClient stopped")
+
+    async def __aenter__(self) -> "GatewayClient":
+        """Async context manager entry."""
+        await self.start()
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
         """Async context manager exit."""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
+        await self.stop()
 
     @property
     def client(self) -> httpx.AsyncClient:
         """Get HTTP client."""
         if self._client is None:
-            raise RuntimeError("GatewayClient not initialized. Use 'async with' context manager.")
+            raise RuntimeError("GatewayClient not started. Call start() or use 'async with'.")
         return self._client
 
     async def chat(
@@ -62,64 +79,52 @@ class GatewayClient:
             Assistant response text
 
         Raises:
-            httpx.HTTPError: If request fails
+            httpx.HTTPStatusError: If HTTP request fails (4xx/5xx)
+            httpx.RequestError: If connection fails
+            RuntimeError: If Gateway returns an error response
         """
-        try:
-            # Build request payload for OpenClaw Gateway
-            # Gateway expects a simple chat completion format
-            payload = {
-                "model": "default",  # OpenClaw uses default model
-                "messages": [
-                    {"role": "user", "content": message},
-                ],
-            }
+        # Build request payload for OpenClaw Gateway
+        payload = {
+            "model": settings.openclaw_model,
+            "messages": [
+                {"role": "user", "content": message},
+            ],
+        }
 
-            if session_id:
-                payload["session_id"] = session_id
+        if session_id:
+            payload["session_id"] = session_id
 
-            if system_prompt:
-                payload["messages"].insert(0, {"role": "system", "content": system_prompt})
+        if system_prompt:
+            payload["messages"].insert(0, {"role": "system", "content": system_prompt})
 
-            logger.info(f"Sending chat request to Gateway: {message[:50]}...")
+        logger.debug(f"Sending chat request (len={len(message)}, session={session_id})")
 
-            # OpenClaw Gateway chat endpoint
-            response = await self.client.post(
-                "/v1/chat/completions",
-                json=payload,
-            )
-            response.raise_for_status()
+        # OpenClaw Gateway chat endpoint
+        response = await self.client.post(
+            "/v1/chat/completions",
+            json=payload,
+        )
+        response.raise_for_status()
 
-            # Parse response
-            data = response.json()
-            
-            # Handle OpenAI-compatible response format
-            if "choices" in data and len(data["choices"]) > 0:
-                content = data["choices"][0].get("message", {}).get("content", "")
-                return content.strip()
+        # Parse response
+        data = response.json()
 
-            # Handle simple text response
-            if "response" in data:
-                return data["response"].strip()
+        # Handle OpenAI-compatible response format
+        if "choices" in data and len(data["choices"]) > 0:
+            content = data["choices"][0].get("message", {}).get("content", "")
+            return content.strip()
 
-            # Handle error response
-            if "error" in data:
-                logger.error(f"Gateway error: {data['error']}")
-                raise RuntimeError(f"Gateway error: {data['error']}")
+        # Handle simple text response
+        if "response" in data:
+            return data["response"].strip()
 
-            logger.warning(f"Unexpected Gateway response format: {data}")
-            return "抱歉，我无法理解响应。"
+        # Handle error response
+        if "error" in data:
+            logger.error(f"Gateway error: {data['error']}")
+            raise RuntimeError(f"Gateway error: {data['error']}")
 
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Gateway HTTP error: {e}")
-            return f"Gateway 请求失败: {e.response.status_code}"
-
-        except httpx.RequestError as e:
-            logger.error(f"Gateway request error: {e}")
-            return f"Gateway 连接失败: {str(e)}"
-
-        except Exception as e:
-            logger.error(f"Unexpected Gateway error: {e}")
-            return f"Gateway 错误: {str(e)}"
+        logger.warning(f"Unexpected Gateway response format: {data}")
+        return "抱歉，我无法理解响应。"
 
     async def health_check(self) -> bool:
         """Check if Gateway is healthy.
