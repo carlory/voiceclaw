@@ -3,8 +3,12 @@ import { useVoiceClient } from '../hooks/useVoiceClient'
 import './VoiceChat.css'
 
 // Only log in development mode
-const devLog = import.meta.env.DEV 
-  ? (type: string, ...args: unknown[]) => console[type](...args)
+const devLog = import.meta.env.DEV
+  ? (type: 'log' | 'error' | 'warn', ...args: unknown[]) => {
+      if (type === 'error') console.error(...args)
+      else if (type === 'warn') console.warn(...args)
+      else console.log(...args)
+    }
   : () => {}
 
 export function VoiceChat() {

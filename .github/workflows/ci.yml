@@ -23,8 +23,6 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: "poetry"
-          cache-dependency-path: voice-server/poetry.lock
 
       - name: Install dependencies
         working-directory: voice-server
