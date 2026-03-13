@@ -24,27 +24,6 @@ jobs:
         working-directory: voice-server
         run: ruff check src/ tests/
 
-  test:
-    runs-on: macos-latest  # MLX requires Apple Silicon
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Poetry
-        run: pipx install poetry
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies
-        working-directory: voice-server
-        run: poetry install --with dev
-
-      - name: Run tests
-        working-directory: voice-server
-        run: poetry run pytest -v --tb=short
-
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -67,3 +46,6 @@ jobs:
         working-directory: web-client
         run: npm run lint
         continue-on-error: true
+
+  # NOTE: Backend tests require Apple Silicon (MLX).
+  # Run locally: cd voice-server && poetry run pytest -v
