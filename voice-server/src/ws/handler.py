@@ -11,6 +11,7 @@ import numpy as np
 from pydantic import BaseModel
 
 from src.config import settings
+from src.gateway.client import GatewayClient
 from src.stt.qwen_asr import get_asr_engine
 from src.tts.qwen_tts import get_tts_engine
 
@@ -38,6 +39,15 @@ class WSMessage(BaseModel):
     speaker: Optional[str] = None
 
 
+# Default system prompt for voice assistant
+DEFAULT_SYSTEM_PROMPT = """你是祥子，一个风趣幽默、适度毒舌的语音助手。
+回复要求：
+- 口语化，像朋友聊天一样
+- 简洁，1-3句话说完
+- 可以适度吐槽，但别刻薄
+- 用中文回复"""
+
+
 class VoiceSession:
     """Manages a single voice session."""
 
@@ -50,6 +60,7 @@ class VoiceSession:
         self.websocket = websocket
         self.asr_engine = get_asr_engine()
         self.tts_engine = get_tts_engine()
+        self.gateway_client = GatewayClient()
         self.audio_buffer: list[np.ndarray] = []
         self.is_recording = False
         self.vad_threshold = settings.vad_threshold
@@ -57,7 +68,23 @@ class VoiceSession:
         self.sample_rate = settings.sample_rate
         self.last_speech_time: Optional[float] = None
         self.silence_start_time: Optional[float] = None
+        self.session_id: Optional[str] = None
+        self._started = False
         logger.info(f"VoiceSession initialized for {self._get_client_info()}")
+
+    async def start(self) -> None:
+        """Start the session (initialize async resources)."""
+        if self._started:
+            return
+        await self.gateway_client.start()
+        self._started = True
+
+    async def stop(self) -> None:
+        """Stop the session (cleanup async resources)."""
+        if not self._started:
+            return
+        await self.gateway_client.stop()
+        self._started = False
 
     def _get_client_info(self) -> str:
         """Get client info for logging."""
@@ -147,8 +174,8 @@ class VoiceSession:
             # Send acknowledgment
             await self._send_transcript(text, language)
 
-            # TODO: Forward to OpenClaw Gateway
-            response_text = f"收到：{text}"  # Placeholder
+            # Forward to OpenClaw Gateway
+            response_text = await self._get_llm_response(text)
 
             # Synthesize response
             await self._synthesize_and_send(response_text)
@@ -180,8 +207,8 @@ class VoiceSession:
             self.last_speech_time = None
             self.silence_start_time = None
 
-            # TODO: Forward to OpenClaw Gateway
-            response_text = f"识别结果：{result.text}"  # Placeholder
+            # Forward to OpenClaw Gateway
+            response_text = await self._get_llm_response(result.text)
 
             # Synthesize response
             await self._synthesize_and_send(response_text)
@@ -193,6 +220,27 @@ class VoiceSession:
             self.is_recording = False
             self.last_speech_time = None
             self.silence_start_time = None
+
+    async def _get_llm_response(self, user_text: str) -> str:
+        """Get response from OpenClaw Gateway.
+
+        Args:
+            user_text: User's transcribed or typed text.
+
+        Returns:
+            LLM response text.
+        """
+        try:
+            response = await self.gateway_client.chat(
+                message=user_text,
+                session_id=self.session_id,
+                system_prompt=DEFAULT_SYSTEM_PROMPT,
+            )
+            return response
+        except Exception as e:
+            logger.error(f"Gateway error: {e}")
+            # Fallback response when Gateway is unavailable
+            return "抱歉，我现在连不上大脑，待会儿再试试？"
 
     async def _synthesize_and_send(self, text: str) -> None:
         """Synthesize text and send audio."""
@@ -271,6 +319,7 @@ async def websocket_handler(websocket) -> None:
     session = VoiceSession(websocket)
 
     try:
+        await session.start()
         while True:
             # Receive message from client
             message = await websocket.receive_text()
@@ -278,3 +327,5 @@ async def websocket_handler(websocket) -> None:
     except Exception as e:
         # WebSocket disconnect or other error
         logger.info(f"WebSocket connection closed ({client_info}): {e}")
+    finally:
+        await session.stop()
