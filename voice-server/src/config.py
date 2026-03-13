@@ -6,7 +6,6 @@ from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-
 # Find .env file
 ENV_FILE = Path(__file__).parent.parent / ".env"
 

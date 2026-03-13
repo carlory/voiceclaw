@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from src.config import settings
-from src.tts.qwen_tts import TTSEngine, SynthesisResult
+from src.tts.qwen_tts import SynthesisResult, TTSEngine
 
 
 class TestTTSEngine:
@@ -28,7 +28,7 @@ class TestTTSEngine:
         """Test basic text synthesis."""
         engine = TTSEngine()
         result = engine.synthesize("你好世界")
-        
+
         assert isinstance(result, SynthesisResult)
         assert isinstance(result.audio, bytes)
         assert result.sample_rate == settings.sample_rate
@@ -37,7 +37,7 @@ class TestTTSEngine:
         """Test synthesis with language code."""
         engine = TTSEngine()
         result = engine.synthesize("Hello world", lang_code="en")
-        
+
         assert isinstance(result, SynthesisResult)
         assert isinstance(result.audio, bytes)
 
@@ -56,7 +56,7 @@ class TestTTSEngine:
     def test_synthesize_to_file(self) -> None:
         """Test synthesis to file."""
         engine = TTSEngine()
-        
+
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "test_output.wav"
             result_path = engine.synthesize_to_file(
@@ -64,7 +64,7 @@ class TestTTSEngine:
                 output_path,
                 lang_code="zh",
             )
-            
+
             assert result_path.exists()
             assert result_path.stat().st_size > 0
 

@@ -1,8 +1,6 @@
 """Qwen3-TTS speech synthesis module."""
 
-import io
 import logging
-import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -137,13 +135,13 @@ class TTSEngine:
             Path to the generated audio file.
         """
         result = self.synthesize(text, lang_code=lang_code, speaker=speaker)
-        
+
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         with open(output_path, "wb") as f:
             f.write(result.audio)
-        
+
         logger.info(f"Audio saved to {output_path}")
         return output_path
 

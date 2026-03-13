@@ -19,16 +19,16 @@ def sample_audio() -> bytes:
     duration = 1.0
     samples = int(sample_rate * duration)
     audio = np.zeros(samples, dtype=np.int16)
-    
+
     # Save to temp WAV file
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
         wavfile.write(f.name, sample_rate, audio)
         path = f.name
-    
+
     # Read back as bytes
     with open(path, "rb") as f:
         data = f.read()
-    
+
     Path(path).unlink()
     return data
 
@@ -59,7 +59,7 @@ class TestASREngine:
         engine = ASREngine()
         # This will use mock mode since mlx-audio may not be installed
         result = engine.transcribe(sample_audio, language="Chinese")
-        
+
         assert isinstance(result, TranscriptionResult)
         assert isinstance(result.text, str)
         assert result.language == "Chinese"
@@ -68,10 +68,10 @@ class TestASREngine:
         """Test transcription with file path."""
         engine = ASREngine()
         result = engine.transcribe(sample_audio_path, language="Chinese")
-        
+
         assert isinstance(result, TranscriptionResult)
         assert isinstance(result.text, str)
-        
+
         # Cleanup
         Path(sample_audio_path).unlink(missing_ok=True)
 
@@ -80,7 +80,7 @@ class TestASREngine:
         engine = ASREngine()
         audio = np.zeros(16000, dtype=np.int16)  # 1 second of silence
         result = engine.transcribe(audio, language="Chinese")
-        
+
         assert isinstance(result, TranscriptionResult)
         assert isinstance(result.text, str)
 

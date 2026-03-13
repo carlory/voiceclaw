@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from src.config import settings
 from src.stt.qwen_asr import ASREngine, TranscriptionResult, get_asr_engine
-from src.tts.qwen_tts import TTSEngine, SynthesisResult, get_tts_engine
+from src.tts.qwen_tts import TTSEngine, get_tts_engine
 from src.ws.handler import websocket_handler
 
 # Configure logging
@@ -31,17 +31,17 @@ _tts_engine: TTSEngine | None = None
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler."""
     global _asr_engine, _tts_engine
-    
+
     logger.info(f"Starting VoiceClaw server on {settings.host}:{settings.port}")
     logger.info(f"ASR model: {settings.asr_model}")
     logger.info(f"TTS model: {settings.tts_model}")
-    
+
     # Initialize engines
     _asr_engine = get_asr_engine()
     _tts_engine = get_tts_engine()
-    
+
     yield
-    
+
     logger.info("Shutting down VoiceClaw server")
 
 
@@ -84,20 +84,20 @@ async def speech_to_text(
     language: str = "Chinese",
 ) -> TranscriptionResult:
     """Transcribe audio to text using Qwen3-ASR.
-    
+
     Args:
         file: Audio file upload.
         language: Language code (e.g., "Chinese", "English").
-    
+
     Returns:
         Transcription result with text.
-    
+
     Raises:
         HTTPException: If transcription fails.
     """
     if _asr_engine is None:
         raise HTTPException(status_code=503, detail="ASR engine not initialized")
-    
+
     try:
         audio_bytes = await file.read()
         result = _asr_engine.transcribe(audio_bytes, language=language)
@@ -119,19 +119,19 @@ class TTSRequest(BaseModel):
 @app.post("/tts")
 async def text_to_speech(request: TTSRequest) -> Response:
     """Synthesize text to speech using Qwen3-TTS.
-    
+
     Args:
         request: TTS request with text, lang_code, and optional speaker.
-    
+
     Returns:
         Audio file (WAV format).
-    
+
     Raises:
         HTTPException: If synthesis fails.
     """
     if _tts_engine is None:
         raise HTTPException(status_code=503, detail="TTS engine not initialized")
-    
+
     try:
         result = _tts_engine.synthesize(
             text=request.text,
@@ -139,7 +139,7 @@ async def text_to_speech(request: TTSRequest) -> Response:
             speaker=request.speaker,
         )
         logger.info(f"Synthesized: {request.text[:50]}... ({result.duration_ms:.0f}ms)")
-        
+
         return Response(
             content=result.audio,
             media_type="audio/wav",
@@ -159,7 +159,7 @@ async def text_to_speech(request: TTSRequest) -> Response:
 @app.websocket("/ws/voice")
 async def websocket_voice_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time voice communication.
-    
+
     Protocol:
     - Client sends: {"type": "audio", "data": "<base64>"}
     - Client sends: {"type": "text", "text": "你好"}
@@ -170,7 +170,7 @@ async def websocket_voice_endpoint(websocket: WebSocket) -> None:
     """
     await websocket.accept()
     logger.info(f"WebSocket connection accepted: {websocket.client}")
-    
+
     try:
         await websocket_handler(websocket)
     except WebSocketDisconnect:
